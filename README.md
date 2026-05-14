@@ -12,7 +12,7 @@ fly auth login
 
 ### 2. Launch app
 ```bash
-fly launch --name ollama-fastapi-railway --region iad --no-deploy
+fly launch --name ollama-fastapi-railway-deployment --region iad --no-deploy
 ```
 
 ### 3. Set secrets
@@ -20,22 +20,22 @@ fly launch --name ollama-fastapi-railway --region iad --no-deploy
 fly secrets set MASTER_KEY=your-strong-master-key-here
 ```
 
-### 4. Deploy
+### 4. Create Persistence (IMPORTANT)
+To avoid losing models on restart, you **must** create the storage volumes before deploying:
+```bash
+fly volume create ollama_data --region iad --count 2 --size 10
+```
+
+### 5. Deploy
 ```bash
 fly deploy
 ```
 
 ## Fly.io Free Tier Limits
 - **Memory**: 2GB max (this config is optimized for it)
-- **CPU**: 2 shared cores
+- **CPU**: 1 shared core (optimized for stability)
 - **Model**: Use qwen2.5:0.5b (~300MB) or tinyllama (~600MB)
-- **Storage**: Ephemeral (models re-download on restart)
-
-## For Bigger Models
-Upgrade to paid plan or use:
-```bash
-fly scale memory 4096  # 4GB - requires paid plan
-```
+- **Storage**: Persistent via Volumes (models stay saved across restarts)
 
 ## Authentication
 
