@@ -24,6 +24,6 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only -a ollama-fastapi-railway-deployment
+        run: flyctl deploy --remote-only --ha=false -a ollama-fastapi-railway-deployment
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
