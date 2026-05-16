@@ -524,7 +524,7 @@ try {
                 const dataStr = line.slice(6);
                 if (dataStr === '[DONE]') break;
                 try {
-                    const data = json.parse(dataStr);
+                    const data = JSON.parse(dataStr);
                     const content = data.choices[0].delta.content || '';
                     assistantMsg.textContent += content;
                     box.scrollTop = box.scrollHeight;
