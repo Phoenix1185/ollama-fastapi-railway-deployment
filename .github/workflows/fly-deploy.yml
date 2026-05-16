@@ -12,17 +12,32 @@ jobs:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
       
-      - name: Dynamic Volume and Region Management
+      - name: Smart Follow Volume Deployment
         run: |
-          echo "Determining target region..."
-          # If a machine already exists, we'll use its region. 
-          # Otherwise, we'll default to 'iad' but ensure a 10GB volume exists there.
-          
-          TARGET_REGION=$(flyctl status --json | python3 -c "import sys, json; data=json.load(sys.stdin); machines=data.get('Machines', []); print(machines[0]['region'] if machines else 'iad')")
-          echo "Target region is: $TARGET_REGION"
-
-          echo "Cleaning up any 1GB volumes..."
+          echo "Finding existing 10GB volume..."
           VOLUMES_JSON=$(flyctl volumes list -a ollama-fastapi-railway-deployment --json)
+          
+          # Find the first 10GB volume and its region
+          TARGET_INFO=$(echo "$VOLUMES_JSON" | python3 -c "
+          import sys, json
+          vols = json.load(sys.stdin)
+          v10 = [v for v in vols if v.get('SizeGb') == 10]
+          if v10:
+              print(f\"{v10[0]['Region']}\")
+          else:
+              print('NONE')
+          ")
+
+          if [ "$TARGET_INFO" = "NONE" ]; then
+            echo "No 10GB volume found. Creating one in iad..."
+            TARGET_REGION="iad"
+            flyctl volumes create ollama_data --region "$TARGET_REGION" --count 1 --size 10 --yes -a ollama-fastapi-railway-deployment
+          else
+            TARGET_REGION="$TARGET_INFO"
+            echo "Found 10GB volume in $TARGET_REGION. Targeting this region."
+          fi
+
+          echo "Cleaning up any small 1GB volumes in other regions..."
           echo "$VOLUMES_JSON" | python3 -c "
           import sys, json, subprocess
           vols = json.load(sys.stdin)
@@ -32,19 +47,7 @@ jobs:
                   subprocess.run(['flyctl', 'volumes', 'destroy', v['id'], '-a', 'ollama-fastapi-railway-deployment', '--yes'])
           "
 
-          echo "Ensuring 10GB volume exists in $TARGET_REGION..."
-          VOLUME_EXISTS=$(flyctl volumes list -a ollama-fastapi-railway-deployment --json | python3 -c "import sys,json; vols=json.load(sys.stdin); print(any(v.get('Region')=='$TARGET_REGION' and v.get('SizeGb')==10 for v in vols))")
-          
-          if [ "$VOLUME_EXISTS" = "False" ]; then
-            echo "Creating 10GB volume in $TARGET_REGION..."
-            flyctl volumes create ollama_data --region "$TARGET_REGION" --count 1 --size 10 --yes -a ollama-fastapi-railway-deployment
-          else
-            echo "10GB volume already exists in $TARGET_REGION."
-          fi
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-
-      - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only --ha=false -a ollama-fastapi-railway-deployment --wait-timeout 400
+          echo "Deploying to $TARGET_REGION..."
+          flyctl deploy --remote-only --ha=false -a ollama-fastapi-railway-deployment --region "$TARGET_REGION" --wait-timeout 400
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

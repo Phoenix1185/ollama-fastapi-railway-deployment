@@ -212,8 +212,14 @@ async def chat_completions(req: ChatRequest, api_key: str = Depends(verify_api_k
             return StreamingResponse(streamer(), media_type="text/event-stream")
 
         async with httpx.AsyncClient(timeout=300) as client:
-            r = await client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
+            r = await client.post(f"{OLLAMA_HOST}/api/chat", json=payload, timeout=300)
             data = r.json()
+            # Ensure we extract the content correctly from Ollama's response
+            content = data.get("message", {}).get("content", "")
+            if not content and not req.stream:
+                # Fallback for some Ollama versions or edge cases
+                content = data.get("response", "")
+            
             return {
                 "id": f"chatcmpl-{int(time.time())}",
                 "object": "chat.completion",
@@ -223,10 +229,15 @@ async def chat_completions(req: ChatRequest, api_key: str = Depends(verify_api_k
                     "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": data.get("message", {}).get("content", "")
+                        "content": content
                     },
                     "finish_reason": "stop"
-                }]
+                }],
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                }
             }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Ollama error: {str(e)}")
