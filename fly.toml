@@ -1,4 +1,5 @@
 app = "ollama-fastapi-railway-deployment"
+primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"
@@ -6,6 +7,8 @@ app = "ollama-fastapi-railway-deployment"
 [env]
   OLLAMA_HOST = "http://localhost:11434"
   OLLAMA_MODELS = "/root/.ollama/models"
+  OLLAMA_KEEP_ALIVE = "-1"
+  OLLAMA_NOPRUNE = "1"
   DATABASE_URL = "postgresql://neondb_owner:npg_1imPJgOw5qBc@ep-divine-fog-ajro56fz-pooler.c-3.us-east-2.aws.neon.tech/Dailymotion%20?sslmode=require&channel_binding=require"
 
 [processes]
@@ -23,7 +26,7 @@ app = "ollama-fastapi-railway-deployment"
   [[http_service.checks]]
     interval = "15s"
     timeout = "10s"
-    grace_period = "60s"
+    grace_period = "30s"
     method = "GET"
     path = "/health"
 
