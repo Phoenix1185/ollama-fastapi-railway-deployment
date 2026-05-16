@@ -186,17 +186,33 @@ async def chat_completions(req: ChatRequest, api_key: str = Depends(verify_api_k
             }
         }
         
-        client = httpx.AsyncClient(timeout=120)
         if req.stream:
             async def streamer():
-                async with client.stream("POST", f"{OLLAMA_HOST}/api/chat", json=payload) as response:
-                    async for line in response.aiter_lines():
-                        if line:
-                            yield line + "\n"
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream("POST", f"{OLLAMA_HOST}/api/chat", json=payload) as response:
+                        async for line in response.aiter_lines():
+                            if line:
+                                try:
+                                    data = json.loads(line)
+                                    chunk = {
+                                        "id": f"chatcmpl-{int(time.time())}",
+                                        "object": "chat.completion.chunk",
+                                        "created": int(time.time()),
+                                        "model": model,
+                                        "choices": [{
+                                            "index": 0,
+                                            "delta": {"content": data.get("message", {}).get("content", "")},
+                                            "finish_reason": "stop" if data.get("done") else None
+                                        }]
+                                    }
+                                    yield f"data: {json.dumps(chunk)}\n\n"
+                                except:
+                                    continue
+                        yield "data: [DONE]\n\n"
             return StreamingResponse(streamer(), media_type="text/event-stream")
         else:
-            async with client as c:
-                r = await c.post(f"{OLLAMA_HOST}/api/chat", json=payload)
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
                 data = r.json()
                 return {
                     "id": f"chatcmpl-{int(time.time())}",
@@ -228,17 +244,17 @@ async def generate(req: GenerateRequest, api_key: str = Depends(verify_api_key))
                 "num_predict": req.max_tokens
             }
         }
-        client = httpx.AsyncClient(timeout=120)
         if req.stream:
             async def streamer():
-                async with client.stream("POST", f"{OLLAMA_HOST}/api/generate", json=payload) as response:
-                    async for line in response.aiter_lines():
-                        if line:
-                            yield line + "\n"
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream("POST", f"{OLLAMA_HOST}/api/generate", json=payload) as response:
+                        async for line in response.aiter_lines():
+                            if line:
+                                yield line + "\n"
             return StreamingResponse(streamer(), media_type="application/x-ndjson")
         else:
-            async with client as c:
-                r = await c.post(f"{OLLAMA_HOST}/api/generate", json=payload)
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(f"{OLLAMA_HOST}/api/generate", json=payload)
                 return r.json()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Ollama error: {str(e)}")
@@ -488,14 +504,33 @@ try {
         body: JSON.stringify({
             model: "qwen2.5:0.5b",
             messages: [{role: "user", content: text}],
-            stream: false
+            stream: true
         })
     });
-    const data = await res.json();
-    if(data.choices && data.choices[0]) {
-        box.innerHTML += `<div class="message assistant">${data.choices[0].message.content}</div>`;
-    } else {
-        box.innerHTML += `<div class="message assistant error">Error: ${JSON.stringify(data)}</div>`;
+    
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let assistantMsg = document.createElement('div');
+    assistantMsg.className = 'message assistant';
+    box.appendChild(assistantMsg);
+    
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\\n');
+        for (const line of lines) {
+            if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6);
+                if (dataStr === '[DONE]') break;
+                try {
+                    const data = json.parse(dataStr);
+                    const content = data.choices[0].delta.content || '';
+                    assistantMsg.textContent += content;
+                    box.scrollTop = box.scrollHeight;
+                } catch (e) {}
+            }
+        }
     }
 } catch(e) {
     box.innerHTML += `<div class="message assistant error">Error: ${e.message}</div>`;
