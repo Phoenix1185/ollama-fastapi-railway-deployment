@@ -1,7 +1,7 @@
 name: Keep Alive Pinger
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/3 * * * *'
   workflow_dispatch:
 jobs:
   ping:

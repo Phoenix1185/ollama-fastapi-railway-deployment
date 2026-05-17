@@ -74,16 +74,23 @@ async def startup_event():
     asyncio.create_task(keep_warm_background())
 
 async def keep_warm_background():
-    """Background task that pings Ollama every 4 minutes to prevent cold starts."""
-    await asyncio.sleep(60)  # Wait 1 minute after startup before first ping
+    """Aggressive background task that pings Ollama every 2 minutes with actual inference."""
+    await asyncio.sleep(30)  # Start sooner
     while True:
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                await client.get(f"{OLLAMA_HOST}/api/tags")
-                logger.info("Keep-warm ping sent to Ollama.")
+            async with httpx.AsyncClient(timeout=30) as client:
+                # Use actual chat endpoint for the heartbeat to ensure model stays in GPU/RAM
+                payload = {
+                    "model": DEFAULT_MODEL,
+                    "messages": [{"role": "user", "content": "heartbeat"}],
+                    "stream": False,
+                    "options": {"num_predict": 1}
+                }
+                await client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
+                logger.info(f"Aggressive keep-warm heartbeat sent for {DEFAULT_MODEL}")
         except Exception as e:
-            logger.warning(f"Keep-warm ping failed: {e}")
-        await asyncio.sleep(240)  # Ping every 4 minutes
+            logger.warning(f"Keep-warm heartbeat failed: {e}")
+        await asyncio.sleep(120)  # Ping every 2 minutes (more frequent)
 
 def get_db():
     if SessionLocal is None:
