@@ -43,15 +43,25 @@ MASTER_KEY = os.getenv("MASTER_KEY", "ollama-master-key-change-me")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Azure OpenAI Configuration
+# Use AZURE_OPENAI_MODEL as the base endpoint if it looks like a URL
+AZURE_OPENAI_MODEL_ENV = os.getenv("AZURE_OPENAI_MODEL", "").strip()
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY", "").strip()
-AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "").strip()
+AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o").strip()
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview").strip()
 
-# Handle different Azure URL formats
-if AZURE_OPENAI_ENDPOINT:
-    if "/openai/v1" in AZURE_OPENAI_ENDPOINT:
-        AZURE_OPENAI_ENDPOINT = AZURE_OPENAI_ENDPOINT.split("/openai/v1")[0]
+# Smart URL handling: If AZURE_OPENAI_MODEL is a URL, it's likely the resource endpoint
+if AZURE_OPENAI_MODEL_ENV.startswith("http"):
+    if "/openai/v1" in AZURE_OPENAI_MODEL_ENV:
+        AZURE_OPENAI_ENDPOINT = AZURE_OPENAI_MODEL_ENV.split("/openai/v1")[0]
+    else:
+        AZURE_OPENAI_ENDPOINT = AZURE_OPENAI_MODEL_ENV
+
+# If AZURE_OPENAI_ENDPOINT is the project URL, we still need the resource URL
+# But the Azure SDK usually wants the .openai.azure.com one
+if "services.ai.azure.com" in AZURE_OPENAI_ENDPOINT and not AZURE_OPENAI_MODEL_ENV.startswith("http"):
+    # Fallback or warning if needed, but we'll try to use what's given
+    pass
 
 USE_AZURE = bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY)
 
