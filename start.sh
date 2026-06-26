@@ -16,9 +16,6 @@ case "$FLY_PROCESS_GROUP" in
     "llama3")
         MODEL_TO_PULL="llama3.2:1b"
         ;;
-    "phi3")
-        MODEL_TO_PULL="phi3:mini"
-        ;;
     *)
         MODEL_TO_PULL="qwen2.5:0.5b"
         ;;
