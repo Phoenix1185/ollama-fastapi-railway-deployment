@@ -108,3 +108,4 @@ print(res.json())
 | tinyllama | ~600MB | Yes |
 | phi3:mini | ~2GB | Maybe (tight) |
 | llama3.2:1b | ~1.3GB | Maybe |
+# Trigger Deploy
