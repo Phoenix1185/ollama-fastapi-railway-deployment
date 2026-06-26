@@ -13,6 +13,6 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Deploy to Fly.io (Local Build on GitHub Runner)
-        run: flyctl deploy --local-only --ha=false -a ollama-fastapi-railway-deployment --region iad --wait-timeout 600 --yes
+        run: flyctl deploy --local-only --ha=false -a ollama-fastapi-railway-deployment --wait-timeout 600 --yes
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
