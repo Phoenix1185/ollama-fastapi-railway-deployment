@@ -55,7 +55,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
-AZURE_OPENAI_DEPLOYMENTS_STR = os.getenv("AZURE_OPENAI_DEPLOYMENTS", "gpt-4o-mini")
+AZURE_OPENAI_DEPLOYMENTS_STR = os.getenv("AZURE_OPENAI_DEPLOYMENTS", "gpt-4o-mini,gpt-35-turbo,gpt-4")
 AZURE_OPENAI_DEPLOYMENTS = [d.strip() for d in AZURE_OPENAI_DEPLOYMENTS_STR.split(",")]
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
 
@@ -406,8 +406,6 @@ async def create_api_key(req: CreateKeyRequest, master_key_valid: bool = Depends
 
 @app.delete("/admin/keys", tags=["Admin"])
 async def revoke_api_key(req: RevokeKeyRequest, master_key_valid: bool = Depends(verify_master_key), db: Session = Depends(get_db)):
-    # Note: This logic assumes we can find the key by hashing the provided key.
-    # Since bcrypt hashes are unique per call (due to salt), we'd need to verify against each stored hash.
     target_key = None
     for stored_key_obj in db.query(APIKey).all():
         try:

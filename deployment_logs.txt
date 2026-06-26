@@ -1,0 +1,261 @@
+flyctl deploy -a ollama-fastapi-railway-deployment-qst2ba --image registry.fly.io/ollama-fastapi-railway-deployment-qst2ba:deployment-730c9d7bf781e4a608166202da4fc98f --depot-scope=app --config fly.toml
+==> Verifying app config
+--> Verified app config
+Validating fly.toml
+[32m✓[0m Configuration is valid
+[33mWARN[0m DATABASE_URL may be a potentially sensitive environment variable. Consider setting it as a secret, and removing it from the [env] section: https://fly.io/docs/apps/secrets/
+
+==> Building image
+Searching for image 'registry.fly.io/ollama-fastapi-railway-deployment-qst2ba:deployment-730c9d7bf781e4a608166202da4fc98f' remotely...
+image found: img_e1zd4mxqnz9lv02y
+
+Watch your deployment at https://fly.io/apps/ollama-fastapi-railway-deployment-qst2ba/monitoring
+
+Process groups have changed. This will:
+ * destroy 1 "phi3" machine
+
+machine 823e04f767e4e8 was found and is currently in started state, attempting to destroy...
+Updating existing machines in 'ollama-fastapi-railway-deployment-qst2ba' with rolling strategy
+> [1/3] Acquiring lease for 2869172f6e0448
+> [1/3] Acquired lease for 2869172f6e0448
+> [2/3] Acquiring lease for d8d04d5b3d2968
+> [2/3] Acquired lease for d8d04d5b3d2968
+> [3/3] Acquiring lease for 7812453be75068
+> [3/3] Acquired lease for 7812453be75068
+> [1/3] Updating machine config for 2869172f6e0448
+> [3/3] Updating machine config for 7812453be75068
+> [1/3] Updating 2869172f6e0448 [llama3]
+> [3/3] Updating 7812453be75068 [qwen]
+> [2/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating d8d04d5b3d2968 [tinyllama]
+✖ [1/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [3/3] Updated machine config for 7812453be75068
+> [3/3] Waiting for machine 7812453be75068 to reach a good state
+> [2/3] Updated machine config for d8d04d5b3d2968
+> [2/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [3/3] Machine 7812453be75068 reached stopped state
+> [2/3] Machine d8d04d5b3d2968 reached stopped state
+✔ [3/3] Machine 7812453be75068 is now in a good state
+✔ [2/3] Machine d8d04d5b3d2968 is now in a good state
+> [3/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating machine config for 7812453be75068
+> [2/3] Updating 7812453be75068 [qwen]
+> [3/3] Updating d8d04d5b3d2968 [tinyllama]
+> [1/3] Updating machine config for 2869172f6e0448
+> [1/3] Updating 2869172f6e0448 [llama3]
+✖ [1/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [3/3] Updated machine config for d8d04d5b3d2968
+> [3/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [2/3] Updated machine config for 7812453be75068
+> [2/3] Waiting for machine 7812453be75068 to reach a good state
+> [3/3] Machine d8d04d5b3d2968 reached stopped state
+✔ [3/3] Machine d8d04d5b3d2968 is now in a good state
+> [2/3] Machine 7812453be75068 reached stopped state
+✔ [2/3] Machine 7812453be75068 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+> [1/3] Updating machine config for 7812453be75068
+> [2/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating d8d04d5b3d2968 [tinyllama]
+> [1/3] Updating 7812453be75068 [qwen]
+> [3/3] Updating machine config for 2869172f6e0448
+> [3/3] Updating 2869172f6e0448 [llama3]
+✖ [3/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [2/3] Updated machine config for d8d04d5b3d2968
+> [2/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [1/3] Updated machine config for 7812453be75068
+> [1/3] Waiting for machine 7812453be75068 to reach a good state
+> [2/3] Machine d8d04d5b3d2968 reached stopped state
+> [1/3] Machine 7812453be75068 reached stopped state
+✔ [2/3] Machine d8d04d5b3d2968 is now in a good state
+✔ [1/3] Machine 7812453be75068 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+> [1/3] Updating machine config for 2869172f6e0448
+> [2/3] Updating machine config for 7812453be75068
+> [2/3] Updating 7812453be75068 [qwen]
+> [1/3] Updating 2869172f6e0448 [llama3]
+> [3/3] Updating machine config for d8d04d5b3d2968
+> [3/3] Updating d8d04d5b3d2968 [tinyllama]
+✖ [1/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [3/3] Updated machine config for d8d04d5b3d2968
+> [3/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [2/3] Updated machine config for 7812453be75068
+> [2/3] Waiting for machine 7812453be75068 to reach a good state
+> [3/3] Machine d8d04d5b3d2968 reached stopped state
+> [2/3] Machine 7812453be75068 reached stopped state
+✔ [3/3] Machine d8d04d5b3d2968 is now in a good state
+✔ [2/3] Machine 7812453be75068 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+> [3/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating machine config for 7812453be75068
+> [2/3] Updating 7812453be75068 [qwen]
+> [3/3] Updating d8d04d5b3d2968 [tinyllama]
+> [1/3] Updating machine config for 2869172f6e0448
+> [1/3] Updating 2869172f6e0448 [llama3]
+> [2/3] Updated machine config for 7812453be75068
+> [2/3] Waiting for machine 7812453be75068 to reach a good state
+> [3/3] Updated machine config for d8d04d5b3d2968
+> [3/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+✖ [1/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [2/3] Machine 7812453be75068 reached stopped state
+> [3/3] Machine d8d04d5b3d2968 reached stopped state
+✔ [2/3] Machine 7812453be75068 is now in a good state
+✔ [3/3] Machine d8d04d5b3d2968 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+> [3/3] Updating machine config for 2869172f6e0448
+> [1/3] Updating machine config for 7812453be75068
+> [1/3] Updating 7812453be75068 [qwen]
+> [3/3] Updating 2869172f6e0448 [llama3]
+> [2/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating d8d04d5b3d2968 [tinyllama]
+✖ [3/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [1/3] Updated machine config for 7812453be75068
+> [1/3] Waiting for machine 7812453be75068 to reach a good state
+> [2/3] Updated machine config for d8d04d5b3d2968
+> [2/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [1/3] Machine 7812453be75068 reached stopped state
+✔ [1/3] Machine 7812453be75068 is now in a good state
+> [2/3] Machine d8d04d5b3d2968 reached stopped state
+Loading...
+flyctl deploy -a ollama-fastapi-railway-deployment-qst2ba --image registry.fly.io/ollama-fastapi-railway-deployment-qst2ba:deployment-730c9d7bf781e4a608166202da4fc98f --depot-scope=app --config fly.toml
+==> Verifying app config
+--> Verified app config
+Validating fly.toml
+[32m✓[0m Configuration is valid
+[33mWARN[0m DATABASE_URL may be a potentially sensitive environment variable. Consider setting it as a secret, and removing it from the [env] section: https://fly.io/docs/apps/secrets/
+
+==> Building image
+Searching for image 'registry.fly.io/ollama-fastapi-railway-deployment-qst2ba:deployment-730c9d7bf781e4a608166202da4fc98f' remotely...
+image found: img_e1zd4mxqnz9lv02y
+
+Watch your deployment at https://fly.io/apps/ollama-fastapi-railway-deployment-qst2ba/monitoring
+
+Process groups have changed. This will:
+ * destroy 1 "phi3" machine
+
+machine 823e04f767e4e8 was found and is currently in started state, attempting to destroy...
+Updating existing machines in 'ollama-fastapi-railway-deployment-qst2ba' with rolling strategy
+> [1/3] Acquiring lease for 2869172f6e0448
+> [1/3] Acquired lease for 2869172f6e0448
+> [2/3] Acquiring lease for d8d04d5b3d2968
+> [2/3] Acquired lease for d8d04d5b3d2968
+> [3/3] Acquiring lease for 7812453be75068
+> [3/3] Acquired lease for 7812453be75068
+> [1/3] Updating machine config for 2869172f6e0448
+> [3/3] Updating machine config for 7812453be75068
+> [1/3] Updating 2869172f6e0448 [llama3]
+> [3/3] Updating 7812453be75068 [qwen]
+> [2/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating d8d04d5b3d2968 [tinyllama]
+✖ [1/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [3/3] Updated machine config for 7812453be75068
+> [3/3] Waiting for machine 7812453be75068 to reach a good state
+> [2/3] Updated machine config for d8d04d5b3d2968
+> [2/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [3/3] Machine 7812453be75068 reached stopped state
+> [2/3] Machine d8d04d5b3d2968 reached stopped state
+✔ [3/3] Machine 7812453be75068 is now in a good state
+✔ [2/3] Machine d8d04d5b3d2968 is now in a good state
+> [3/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating machine config for 7812453be75068
+> [2/3] Updating 7812453be75068 [qwen]
+> [3/3] Updating d8d04d5b3d2968 [tinyllama]
+> [1/3] Updating machine config for 2869172f6e0448
+> [1/3] Updating 2869172f6e0448 [llama3]
+✖ [1/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [3/3] Updated machine config for d8d04d5b3d2968
+> [3/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [2/3] Updated machine config for 7812453be75068
+> [2/3] Waiting for machine 7812453be75068 to reach a good state
+> [3/3] Machine d8d04d5b3d2968 reached stopped state
+✔ [3/3] Machine d8d04d5b3d2968 is now in a good state
+> [2/3] Machine 7812453be75068 reached stopped state
+✔ [2/3] Machine 7812453be75068 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+> [1/3] Updating machine config for 7812453be75068
+> [2/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating d8d04d5b3d2968 [tinyllama]
+> [1/3] Updating 7812453be75068 [qwen]
+> [3/3] Updating machine config for 2869172f6e0448
+> [3/3] Updating 2869172f6e0448 [llama3]
+✖ [3/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [2/3] Updated machine config for d8d04d5b3d2968
+> [2/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [1/3] Updated machine config for 7812453be75068
+> [1/3] Waiting for machine 7812453be75068 to reach a good state
+> [2/3] Machine d8d04d5b3d2968 reached stopped state
+> [1/3] Machine 7812453be75068 reached stopped state
+✔ [2/3] Machine d8d04d5b3d2968 is now in a good state
+✔ [1/3] Machine 7812453be75068 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+> [1/3] Updating machine config for 2869172f6e0448
+> [2/3] Updating machine config for 7812453be75068
+> [2/3] Updating 7812453be75068 [qwen]
+> [1/3] Updating 2869172f6e0448 [llama3]
+> [3/3] Updating machine config for d8d04d5b3d2968
+> [3/3] Updating d8d04d5b3d2968 [tinyllama]
+✖ [1/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [3/3] Updated machine config for d8d04d5b3d2968
+> [3/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [2/3] Updated machine config for 7812453be75068
+> [2/3] Waiting for machine 7812453be75068 to reach a good state
+> [3/3] Machine d8d04d5b3d2968 reached stopped state
+> [2/3] Machine 7812453be75068 reached stopped state
+✔ [3/3] Machine d8d04d5b3d2968 is now in a good state
+✔ [2/3] Machine 7812453be75068 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+> [3/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating machine config for 7812453be75068
+> [2/3] Updating 7812453be75068 [qwen]
+> [3/3] Updating d8d04d5b3d2968 [tinyllama]
+> [1/3] Updating machine config for 2869172f6e0448
+> [1/3] Updating 2869172f6e0448 [llama3]
+> [2/3] Updated machine config for 7812453be75068
+> [2/3] Waiting for machine 7812453be75068 to reach a good state
+> [3/3] Updated machine config for d8d04d5b3d2968
+> [3/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+✖ [1/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [2/3] Machine 7812453be75068 reached stopped state
+> [3/3] Machine d8d04d5b3d2968 reached stopped state
+✔ [2/3] Machine 7812453be75068 is now in a good state
+✔ [3/3] Machine d8d04d5b3d2968 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+> [3/3] Updating machine config for 2869172f6e0448
+> [1/3] Updating machine config for 7812453be75068
+> [1/3] Updating 7812453be75068 [qwen]
+> [3/3] Updating 2869172f6e0448 [llama3]
+> [2/3] Updating machine config for d8d04d5b3d2968
+> [2/3] Updating d8d04d5b3d2968 [tinyllama]
+✖ [3/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [1/3] Updated machine config for 7812453be75068
+> [1/3] Waiting for machine 7812453be75068 to reach a good state
+> [2/3] Updated machine config for d8d04d5b3d2968
+> [2/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [1/3] Machine 7812453be75068 reached stopped state
+✔ [1/3] Machine 7812453be75068 is now in a good state
+> [2/3] Machine d8d04d5b3d2968 reached stopped state
+✔ [2/3] Machine d8d04d5b3d2968 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+> [3/3] Updating machine config for d8d04d5b3d2968
+> [1/3] Updating machine config for 2869172f6e0448
+> [3/3] Updating d8d04d5b3d2968 [tinyllama]
+> [1/3] Updating 2869172f6e0448 [llama3]
+> [2/3] Updating machine config for 7812453be75068
+> [2/3] Updating 7812453be75068 [qwen]
+✖ [1/3] failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [2/3] Updated machine config for 7812453be75068
+> [2/3] Waiting for machine 7812453be75068 to reach a good state
+> [3/3] Updated machine config for d8d04d5b3d2968
+> [3/3] Waiting for machine d8d04d5b3d2968 to reach a good state
+> [2/3] Machine 7812453be75068 reached stopped state
+✔ [2/3] Machine 7812453be75068 is now in a good state
+> [3/3] Machine d8d04d5b3d2968 reached stopped state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) Retrying...
+✔ [3/3] Machine d8d04d5b3d2968 is now in a good state
+Failed to update machines: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit)
+> [3/3] Clearing lease for 7812453be75068
+> [1/3] Clearing lease for 2869172f6e0448
+> [2/3] Clearing lease for d8d04d5b3d2968
+✔ [3/3] Cleared lease for 7812453be75068
+✔ [1/3] Cleared lease for 2869172f6e0448
+✔ [2/3] Cleared lease for d8d04d5b3d2968
+Error: failed to update machine 2869172f6e0448: failed to update VM 2869172f6e0448: internal: could not reserve resource for machine: governor policy blocked start: hard gate failed: cpu_overcommit_exceeded (CPU allocation would exceed max overcommit) (Request ID: 01KW1M43BF5MNDMV24MQYZ6Z4B-iad) (Trace ID: c0044a35e5cfed6b4e03f325ea3f3e4f)
