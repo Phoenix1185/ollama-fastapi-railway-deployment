@@ -9,7 +9,7 @@ primary_region = "iad"
   OLLAMA_MODELS = "/root/.ollama/models"
   OLLAMA_KEEP_ALIVE = "-1"
   OLLAMA_NOPRUNE = "1"
-  DATABASE_URL = "postgresql://neondb_owner:npg_1imPJgOw5qBc@ep-divine-fog-ajro56fz-pooler.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require"
+  DATABASE_URL = "postgresql://neondb_owner:npg_sNEqonT0xkM3@ep-square-hall-ap9xbqqe-pooler.c-7.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
 [processes]
   qwen = "/start.sh"
