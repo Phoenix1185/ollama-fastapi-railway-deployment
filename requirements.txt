@@ -9,3 +9,4 @@ psycopg2-binary
 databases[postgresql]
 openai
 bcrypt
+async_generator

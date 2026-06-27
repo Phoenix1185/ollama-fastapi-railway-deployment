@@ -439,14 +439,20 @@ async def chat_completions(request: ChatRequest, token: str = Depends(verify_api
             if request.stream:
                 async def azure_stream_generator():
                     try:
-                        response = azure_client.chat.completions.create(
+                        from openai import AsyncAzureOpenAI
+                        async_azure_client = AsyncAzureOpenAI(
+                            api_key=AZURE_OPENAI_KEY,
+                            api_version=AZURE_OPENAI_API_VERSION,
+                            azure_endpoint=AZURE_OPENAI_ENDPOINT
+                        )
+                        response = await async_azure_client.chat.completions.create(
                             model=model,
                             messages=azure_messages,
                             temperature=request.temperature,
                             max_tokens=request.max_tokens,
                             stream=True
                         )
-                        for chunk in response:
+                        async for chunk in response:
                             if chunk.choices and len(chunk.choices) > 0:
                                 chunk_dict = {
                                     "id": chunk.id,
@@ -514,7 +520,7 @@ async def chat_completions(request: ChatRequest, token: str = Depends(verify_api
                             "choices": [{
                                 "index": 0,
                                 "delta": {"content": data.get("message", {}).get("content", "")},
-                                "finish_reason": "stop" if data.get("done") else None
+                                "finish_reason": data.get("done_reason") if data.get("done") else None
                             }]
                         }
                         yield f"data: {json.dumps(chunk)}\n\n"
