@@ -1,40 +1,33 @@
-
 import os
-import json
-import asyncio
-import uvicorn
-from typing import List, Dict, Any, Union, Optional
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, HTTPException, Depends, status, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.middleware.cors import CORSMiddleware
-
-from pydantic import BaseModel, Field
-
-from sqlalchemy import create_engine, Column, Integer, String, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-
-import bcrypt
+import time
 import secrets
+import hashlib
 import httpx
+import asyncio
+import json
+import logging
+from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+from sqlalchemy import create_engine, Column, String, Integer, BigInteger, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
 
-# Conditional import for AzureOpenAI
-USE_AZURE = os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_ENDPOINT")
-if USE_AZURE:
-    from openai import AzureOpenAI
+# Logging setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# --- App Setup ---
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    asyncio.create_task(keep_warm_background())
-    yield
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="Ollama API Server",
+    description="Self-hosted LLM API with Ollama + FastAPI. API key protected.",
+    version="2.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,464 +37,735 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Environment Variables ---
-
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "tinyllama:latest")
-MASTER_KEY = os.getenv("MASTER_KEY")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:0.5b")
+MASTER_KEY = os.getenv("MASTER_KEY", "ollama-master-key-change-me")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# --- Azure OpenAI Configuration ---
+# Azure OpenAI Configuration
+AZURE_OPENAI_MODEL_ENV = os.getenv("AZURE_OPENAI_MODEL", "").strip()
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
+AZURE_OPENAI_KEY = (os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("AZURE_OPENAI_KEY") or "").strip()
+AZURE_OPENAI_DEPLOYMENTS = os.getenv("AZURE_OPENAI_DEPLOYMENTS", "gpt-4o,gpt-4o-mini").strip().split(",")
+AZURE_OPENAI_DEPLOYMENTS = [d.strip() for d in AZURE_OPENAI_DEPLOYMENTS if d.strip()]
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview").strip()
 
-AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
-AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
-AZURE_OPENAI_DEPLOYMENTS_STR = os.getenv("AZURE_OPENAI_DEPLOYMENTS", "gpt-4o-mini,gpt-35-turbo,gpt-4")
-AZURE_OPENAI_DEPLOYMENTS = [d.strip() for d in AZURE_OPENAI_DEPLOYMENTS_STR.split(",")]
-AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+# Extract the clean endpoint from AZURE_OPENAI_MODEL if provided
+if AZURE_OPENAI_MODEL_ENV.startswith("http"):
+    if "/openai/v1" in AZURE_OPENAI_MODEL_ENV:
+        AZURE_OPENAI_ENDPOINT = AZURE_OPENAI_MODEL_ENV.split("/openai/v1")[0]
+    elif "/openai" in AZURE_OPENAI_MODEL_ENV:
+        AZURE_OPENAI_ENDPOINT = AZURE_OPENAI_MODEL_ENV.split("/openai")[0]
 
-azure_client = None
+USE_AZURE = bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY)
+
 if USE_AZURE:
-    azure_client = AzureOpenAI(
-        api_key=AZURE_OPENAI_API_KEY,
-        api_version=AZURE_OPENAI_API_VERSION,
-        azure_endpoint=AZURE_OPENAI_ENDPOINT
-    )
+    from openai import AzureOpenAI
+    try:
+        azure_client = AzureOpenAI(
+            api_key=AZURE_OPENAI_KEY,
+            api_version=AZURE_OPENAI_API_VERSION,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT
+        )
+        logger.info(f"Azure OpenAI client initialized with endpoint: {AZURE_OPENAI_ENDPOINT}")
+    except Exception as e:
+        logger.error(f"Failed to initialize Azure client: {e}")
+        azure_client = None
+        USE_AZURE = False
+else:
+    azure_client = None
 
-# --- Database Setup ---
-
+# Database Setup
 Base = declarative_base()
 
 class APIKey(Base):
     __tablename__ = "api_keys"
-    id = Column(Integer, primary_key=True, index=True)
-    hashed_key = Column(String, unique=True, index=True)
-    is_master = Column(Boolean, default=False)
+    id = Column(Integer, primary_key=True)
+    key_hash = Column(String(64), unique=True, index=True)
+    name = Column(String(100))
+    created_at = Column(BigInteger)
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = None
+SessionLocal = None
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    global engine, SessionLocal
+    if not DATABASE_URL:
+        logger.error("DATABASE_URL not set. API key management will fail.")
+        return
+    try:
+        engine = create_engine(DATABASE_URL)
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database initialized successfully.")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    init_db()
+    asyncio.create_task(keep_warm_background())
+
+async def keep_warm_background():
+    """Aggressive background task that pings Ollama every 2 minutes with actual inference."""
+    await asyncio.sleep(30)  # Start sooner
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                # Use actual chat endpoint for the heartbeat to ensure model stays in GPU/RAM
+                payload = {
+                    "model": DEFAULT_MODEL,
+                    "messages": [{"role": "user", "content": "heartbeat"}],
+                    "stream": False,
+                    "options": {"num_predict": 1}
+                }
+                await client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
+                logger.info(f"Aggressive keep-warm heartbeat sent for {DEFAULT_MODEL}")
+        except Exception as e:
+            logger.warning(f"Keep-warm heartbeat failed: {e}")
+        await asyncio.sleep(120)  # Ping every 2 minutes (more frequent)
 
 def get_db():
+    if SessionLocal is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-# --- Background Task for Model Warm-up ---
-
-async def keep_warm_background():
-    while True:
-        try:
-            # Ping Ollama to keep the default model warm
-            async with httpx.AsyncClient() as client:
-                await client.post(f"{OLLAMA_HOST}/api/generate", json={
-                    "model": DEFAULT_MODEL,
-                    "prompt": "Hi",
-                    "stream": False,
-                    "options": {"num_predict": 1}
-                }, timeout=30.0)
-            print(f"Heartbeat: {DEFAULT_MODEL} kept warm.")
-        except Exception as e:
-            print(f"Heartbeat failed: {e}")
-        await asyncio.sleep(300) # Ping every 5 minutes
-
-# --- Security ---
-
-security = HTTPBearer()
+# Security
+security = HTTPBearer(auto_error=False)
 
 def hash_key(key: str) -> str:
-    return bcrypt.hashpw(key.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return hashlib.sha256(key.encode()).hexdigest()
 
-def verify_api_key(api_key: str, db: Session = Depends(get_db)) -> bool:
-    if MASTER_KEY and api_key == MASTER_KEY:
-        return True
-    # Iterate through all stored keys and verify
-    for stored_key_obj in db.query(APIKey).all():
-        try:
-            if bcrypt.checkpw(api_key.encode("utf-8"), stored_key_obj.hashed_key.encode("utf-8")):
-                return True
-        except ValueError:
-            # Handle cases where hashed_key might be malformed or not a bcrypt hash
-            continue
-    return False
+def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security), db = Depends(get_db)):
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Missing Authorization header. Use: Bearer YOUR_API_KEY")
+    token = credentials.credentials
+    
+    # Allow Master Key for all endpoints
+    if token == MASTER_KEY:
+        return token
+        
+    key_hash = hash_key(token)
+    key_record = db.query(APIKey).filter(APIKey.key_hash == key_hash).first()
+    if not key_record:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return token
 
-def verify_master_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
-    if not MASTER_KEY:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Master key not set")
-    if credentials.credentials == MASTER_KEY:
-        return True
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid master key")
+def verify_master_key(x_master_key: str = Header(None)):
+    if not x_master_key:
+        raise HTTPException(status_code=401, detail="Missing X-Master-Key header")
+    if x_master_key != MASTER_KEY:
+        raise HTTPException(status_code=403, detail="Invalid master key")
+    return x_master_key
 
-# --- Pydantic Models ---
-
+# Request Models
 class ChatMessage(BaseModel):
     role: str
-    content: Optional[Union[str, List[Dict[str, Any]]]] = None # For multimodal input
-    images: Optional[List[str]] = None # For base64 image data
+    content: str
 
 class ChatRequest(BaseModel):
-    model: str = Field(..., example="tinyllama:latest")
+    model: Optional[str] = None
     messages: List[ChatMessage]
     stream: bool = False
     temperature: Optional[float] = 0.7
-    max_tokens: Optional[int] = None
+    max_tokens: Optional[int] = 2048
 
 class GenerateRequest(BaseModel):
-    model: str = Field(..., example="tinyllama:latest")
+    model: Optional[str] = None
     prompt: str
     stream: bool = False
-    system: Optional[str] = None
-    template: Optional[str] = None
-    context: Optional[List[int]] = None
-    raw: Optional[bool] = False
-    format: Optional[str] = None
-    options: Optional[Dict[str, Any]] = None
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = 2048
 
 class PullModelRequest(BaseModel):
     name: str
 
 class CreateKeyRequest(BaseModel):
-    key: Optional[str] = None
+    name: str
 
 class RevokeKeyRequest(BaseModel):
-    key: str
+    key_hash: str
 
-# --- Endpoints ---
-
-@app.get("/health", tags=["Health Check"])
-async def health_check():
-    ollama_status = "disconnected"
+# Endpoints
+@app.get("/health")
+async def health():
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{OLLAMA_HOST}/api/tags", timeout=5.0)
-            if response.status_code == 200:
-                ollama_status = "connected"
-    except httpx.RequestError:
+            r = await client.get(f"{OLLAMA_HOST}/api/tags", timeout=5)
+            if r.status_code == 200:
+                return {"status": "ok", "ollama": "connected", "auth": "enabled"}
+    except:
         pass
-    return {"status": "ok", "ollama": ollama_status, "auth": "enabled" if MASTER_KEY else "disabled"}
+    return {"status": "degraded", "ollama": "not ready", "auth": "enabled"}
 
-@app.get("/ping", tags=["Health Check"])
+@app.get("/ping")
 async def ping():
-    return {"message": "pong"}
+    """Lightweight keep-alive endpoint for external pingers. No auth required."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{OLLAMA_HOST}/api/tags")
+            if r.status_code == 200:
+                return {"status": "alive", "timestamp": int(time.time())}
+    except:
+        pass
+    return {"status": "starting", "timestamp": int(time.time())}
 
-@app.get("/warmup", tags=["Health Check"])
-async def warmup_status():
-    return {"message": f"Keeping {DEFAULT_MODEL} warm."}
+@app.post("/warmup")
+async def warmup():
+    """Send a tiny inference to keep the model loaded in RAM. No auth required."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            payload = {
+                "model": DEFAULT_MODEL,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+                "options": {"num_predict": 1}
+            }
+            r = await client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
+            return {"status": "warm", "model": DEFAULT_MODEL, "timestamp": int(time.time())}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-@app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
-@app.get("/UI", response_class=HTMLResponse, include_in_schema=False)
-async def get_root():
+@app.get("/", response_class=HTMLResponse)
+@app.get("/ui", response_class=HTMLResponse)
+@app.get("/UI", response_class=HTMLResponse)
+async def web_ui():
     return HTML_CONTENT
 
-@app.get("/api-docs", response_class=HTMLResponse, include_in_schema=False)
-async def get_api_docs():
+@app.get("/api-docs", response_class=HTMLResponse)
+async def api_docs():
     return API_DOCS_CONTENT
 
-@app.get("/v1/models", tags=["Models"])
-async def get_models(request: Request, db: Session = Depends(get_db)):
-    api_key_header = request.headers.get("Authorization")
-    if api_key_header and api_key_header.startswith("Bearer "):
-        api_key = api_key_header.split(" ")[1]
-        if not verify_api_key(api_key, db):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-    else:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
-
-    ollama_models = []
+@app.get("/v1/models")
+async def list_models(api_key: str = Depends(verify_api_key)):
+    models = []
+    
+    # Add Azure models if configured
+    if USE_AZURE:
+        for deployment in AZURE_OPENAI_DEPLOYMENTS:
+            models.append({
+                "id": deployment,
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "azure"
+            })
+        
+    # Add Ollama models
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{OLLAMA_HOST}/api/tags", timeout=10.0)
-            response.raise_for_status()
-            data = response.json()
-            ollama_models = [{
-                "id": model["name"],
-                "object": "model",
-                "created": 1678901234,
-                "owned_by": "ollama",
-            } for model in data.get("models", [])]
-    except httpx.RequestError:
-        pass
-    except httpx.HTTPStatusError as e:
-        print(f"Error fetching Ollama models: {e}")
+            r = await client.get(f"{OLLAMA_HOST}/api/tags", timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                for m in data.get("models", []):
+                    models.append({
+                        "id": m["name"],
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": "ollama"
+                    })
+    except Exception as e:
+        logger.error(f"Ollama tags error: {e}")
+        if not models:
+            return {"object": "list", "data": []}
+            
+    return {"object": "list", "data": models}
 
-    azure_models = []
-    if USE_AZURE:
-        for deployment_name in AZURE_OPENAI_DEPLOYMENTS:
-            azure_models.append({
-                "id": deployment_name,
-                "object": "model",
-                "created": 1678901234, # Placeholder
-                "owned_by": "azure",
-            })
-
-    return {"data": ollama_models + azure_models, "object": "list"}
-
-@app.post("/v1/chat/completions", tags=["Chat"])
-async def chat_completions(req: ChatRequest, request: Request, db: Session = Depends(get_db)):
-    api_key_header = request.headers.get("Authorization")
-    if api_key_header and api_key_header.startswith("Bearer "):
-        api_key = api_key_header.split(" ")[1]
-        if not verify_api_key(api_key, db):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-    else:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
-
-    requested_model = req.model
-
-    # Prepare messages for Ollama or Azure
-    ollama_messages = []
-    azure_messages = []
-    for msg in req.messages:
-        ollama_msg_content = msg.content if isinstance(msg.content, str) else ""
-        ollama_msg = {"role": msg.role, "content": ollama_msg_content}
-        
-        azure_content_parts = []
-        if isinstance(msg.content, str):
-            if msg.content:
-                azure_content_parts.append({"type": "text", "text": msg.content})
-        elif isinstance(msg.content, list):
-            azure_content_parts.extend(msg.content)
-
-        if msg.images:
-            # Ollama expects base64 encoded images directly in the message
-            ollama_msg["images"] = msg.images
-            # Azure expects image URLs or base64 data in a specific content block format
-            for img_url_or_base64 in msg.images:
-                if img_url_or_base64.startswith("http") or img_url_or_base64.startswith("data:image"): # Assume it's a URL or base64 data URI
-                    azure_content_parts.append({"type": "image_url", "image_url": {"url": img_url_or_base64}})
-                else:
-                    # If it's just base64 string without data URI prefix, add it
-                    azure_content_parts.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_url_or_base64}"}})
-        
-        azure_msg = {"role": msg.role, "content": azure_content_parts}
-        ollama_messages.append(ollama_msg)
-        azure_messages.append(azure_msg)
-
-    # Route to Azure OpenAI if the model is in AZURE_OPENAI_DEPLOYMENTS
-    if USE_AZURE and requested_model in AZURE_OPENAI_DEPLOYMENTS:
-        if req.stream:
-            async def azure_streaming_generator():
-                try:
-                    stream = azure_client.chat.completions.create(
-                        model=requested_model,
-                        messages=azure_messages,
-                        temperature=req.temperature,
-                        max_tokens=req.max_tokens,
-                        stream=True
-                    )
-                    for chunk in stream:
-                        if chunk.choices and chunk.choices[0].delta.content is not None:
-                            yield f"data: {json.dumps(chunk.model_dump())}\n\n"
-                    yield "data: [DONE]\n\n"
-                except Exception as e:
-                    print(f"Azure streaming error: {e}")
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            return StreamingResponse(azure_streaming_generator(), media_type="text/event-stream")
-        else:
-            response = azure_client.chat.completions.create(
-                model=requested_model,
-                messages=azure_messages,
-                temperature=req.temperature,
-                max_tokens=req.max_tokens,
-                stream=False
-            )
-            return response.model_dump()
-    else:
-        # Route to Ollama
-        ollama_request_data = {
-            "model": requested_model,
-            "messages": ollama_messages,
-            "stream": req.stream,
-            "options": {"temperature": req.temperature}
-        }
-        if req.max_tokens:
-            ollama_request_data["options"]["num_predict"] = req.max_tokens
-
-        if req.stream:
-            async def ollama_streaming_generator():
-                try:
-                    async with httpx.AsyncClient(timeout=None) as client:
-                        async with client.stream("POST", f"{OLLAMA_HOST}/api/chat", json=ollama_request_data) as response:
-                            response.raise_for_status()
-                            async for chunk in response.aiter_bytes():
-                                try:
-                                    # Ollama sends newline-delimited JSON objects
-                                    for line in chunk.decode().splitlines():
-                                        if line.strip():
-                                            yield f"data: {line}\n\n"
-                                except json.JSONDecodeError:
-                                    print(f"Could not decode JSON from chunk: {chunk.decode()}")
-                                    continue
-                    yield "data: [DONE]\n\n"
-                except Exception as e:
-                    print(f"Ollama streaming error: {e}")
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            return StreamingResponse(ollama_streaming_generator(), media_type="text/event-stream")
-        else:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(f"{OLLAMA_HOST}/api/chat", json=ollama_request_data, timeout=None)
-                response.raise_for_status()
-                return response.json()
-
-@app.post("/api/generate", tags=["Generate (Ollama specific)"])
-async def generate_completion(req: GenerateRequest, request: Request, db: Session = Depends(get_db)):
-    api_key_header = request.headers.get("Authorization")
-    if api_key_header and api_key_header.startswith("Bearer "):
-        api_key = api_key_header.split(" ")[1]
-        if not verify_api_key(api_key, db):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-    else:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
-
-    ollama_request_data = req.model_dump(exclude_unset=True)
-    ollama_request_data["model"] = req.model
-
-    if req.stream:
-        async def ollama_generate_streaming_generator():
-            try:
-                async with httpx.AsyncClient(timeout=None) as client:
-                    async with client.stream("POST", f"{OLLAMA_HOST}/api/generate", json=ollama_request_data) as response:
-                        response.raise_for_status()
-                        async for chunk in response.aiter_bytes():
-                            try:
-                                for line in chunk.decode().splitlines():
-                                    if line.strip():
-                                        yield f"data: {line}\n\n"
-                            except json.JSONDecodeError:
-                                print(f"Could not decode JSON from chunk: {chunk.decode()}")
-                                continue
-                yield "data: [DONE]\n\n"
-            except Exception as e:
-                print(f"Ollama generate streaming error: {e}")
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
-        return StreamingResponse(ollama_generate_streaming_generator(), media_type="text/event-stream")
-    else:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(f"{OLLAMA_HOST}/api/generate", json=ollama_request_data, timeout=None)
-            response.raise_for_status()
-            return response.json()
-
-@app.get("/admin/keys", tags=["Admin"], response_model=List[Dict[str, Any]])
-async def get_api_keys(master_key_valid: bool = Depends(verify_master_key), db: Session = Depends(get_db)):
-    keys = db.query(APIKey).all()
-    return [{
-        "id": key.id,
-        "hashed_key": key.hashed_key,
-        "is_master": key.is_master
-    } for key in keys]
-
-@app.post("/admin/keys", tags=["Admin"])
-async def create_api_key(req: CreateKeyRequest, master_key_valid: bool = Depends(verify_master_key), db: Session = Depends(get_db)):
-    new_key = req.key if req.key else secrets.token_urlsafe(32)
-    hashed_new_key = hash_key(new_key)
-    db_key = APIKey(hashed_key=hashed_new_key)
-    db.add(db_key)
-    db.commit()
-    db.refresh(db_key)
-    return {"message": "API key created successfully", "key": new_key, "hashed_key": hashed_new_key}
-
-@app.delete("/admin/keys", tags=["Admin"])
-async def revoke_api_key(req: RevokeKeyRequest, master_key_valid: bool = Depends(verify_master_key), db: Session = Depends(get_db)):
-    target_key = None
-    for stored_key_obj in db.query(APIKey).all():
+@app.post("/v1/chat/completions")
+async def chat_completions(req: ChatRequest, api_key: str = Depends(verify_api_key)):
+    model = req.model or DEFAULT_MODEL
+    
+    # Check if we should use Azure
+    requested_model = req.model or DEFAULT_MODEL
+    use_azure_for_this = USE_AZURE and requested_model in AZURE_OPENAI_DEPLOYMENTS
+    
+    if use_azure_for_this:
+        if not azure_client:
+            logger.error("Azure client is not initialized.")
+            raise HTTPException(status_code=500, detail="Azure client not initialized. Check your environment variables.")
         try:
-            if bcrypt.checkpw(req.key.encode("utf-8"), stored_key_obj.hashed_key.encode("utf-8")):
-                target_key = stored_key_obj
-                break
-        except Exception:
-            continue
-    
-    if target_key:
-        db.delete(target_key)
+            messages = [{"role": m.role, "content": m.content} for m in req.messages]
+            logger.info(f"Sending request to Azure OpenAI: {requested_model}")
+            
+            if req.stream:
+                response = azure_client.chat.completions.create(
+                    model=requested_model,
+                    messages=messages,
+                    temperature=req.temperature,
+                    max_tokens=req.max_tokens,
+                    stream=True
+                )
+                
+                async def azure_streamer():
+                    try:
+                        for chunk in response:
+                            if chunk.choices:
+                                yield f"data: {json.dumps(chunk.model_dump())}\n\n"
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        logger.error(f"Azure streaming error: {e}")
+                        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                return StreamingResponse(azure_streamer(), media_type="text/event-stream")
+            else:
+                response = azure_client.chat.completions.create(
+                    model=requested_model,
+                    messages=messages,
+                    temperature=req.temperature,
+                    max_tokens=req.max_tokens,
+                    stream=False
+                )
+                return response.model_dump()
+        except Exception as e:
+            logger.error(f"Azure OpenAI error: {e}")
+            raise HTTPException(status_code=500, detail=f"Azure error: {str(e)}")
+            
+    # Fallback to Ollama
+    try:
+        payload = {
+            "model": model,
+            "messages": [{"role": m.role, "content": m.content} for m in req.messages],
+            "stream": req.stream,
+            "options": {
+                "temperature": req.temperature,
+                "num_predict": req.max_tokens
+            }
+        }
+        
+        if req.stream:
+            async def streamer():
+                async with httpx.AsyncClient(timeout=None) as client:
+                    try:
+                        async with client.stream("POST", f"{OLLAMA_HOST}/api/chat", json=payload) as response:
+                            async for line in response.aiter_lines():
+                                if line:
+                                    data = json.loads(line)
+                                    chunk = {
+                                        "id": f"chatcmpl-{int(time.time())}",
+                                        "object": "chat.completion.chunk",
+                                        "created": int(time.time()),
+                                        "model": model,
+                                        "choices": [{
+                                            "index": 0,
+                                            "delta": {"content": data.get("message", {}).get("content", "")},
+                                            "finish_reason": "stop" if data.get("done") else None
+                                        }]
+                                    }
+                                    yield f"data: {json.dumps(chunk)}\n\n"
+                            yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            return StreamingResponse(streamer(), media_type="text/event-stream")
+        else:
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
+                data = r.json()
+                return {
+                    "id": f"chatcmpl-{int(time.time())}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": data.get("message", {}).get("content", "")
+                        },
+                        "finish_reason": "stop"
+                    }]
+                }
+    except Exception as e:
+        logger.error(f"Chat completion error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@app.post("/api/generate")
+async def generate(req: GenerateRequest, api_key: str = Depends(verify_api_key)):
+    model = req.model or DEFAULT_MODEL
+    try:
+        payload = {
+            "model": model,
+            "prompt": req.prompt,
+            "stream": req.stream,
+            "options": {
+                "temperature": req.temperature,
+                "num_predict": req.max_tokens
+            }
+        }
+        if req.stream:
+            async def streamer():
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream("POST", f"{OLLAMA_HOST}/api/generate", json=payload) as response:
+                        async for line in response.aiter_lines():
+                            if line:
+                                yield line + "\n"
+            return StreamingResponse(streamer(), media_type="application/x-ndjson")
+        else:
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(f"{OLLAMA_HOST}/api/generate", json=payload)
+                return r.json()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Ollama error: {str(e)}")
+
+@app.get("/api/models")
+async def ollama_models(api_key: str = Depends(verify_api_key)):
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{OLLAMA_HOST}/api/tags", timeout=30)
+            return r.json()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Ollama error: {str(e)}")
+
+@app.post("/api/pull")
+async def pull_model(req: PullModelRequest, api_key: str = Depends(verify_api_key)):
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            payload = {"name": req.name, "stream": False}
+            r = await client.post(f"{OLLAMA_HOST}/api/pull", json=payload)
+            return r.json()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Ollama error: {str(e)}")
+
+# Admin Endpoints
+@app.post("/admin/keys")
+async def create_key(req: CreateKeyRequest, master: str = Depends(verify_master_key), db = Depends(get_db)):
+    raw_key = "ollama_" + secrets.token_urlsafe(32)
+    key_hash = hash_key(raw_key)
+    new_key = APIKey(
+        key_hash=key_hash,
+        name=req.name,
+        created_at=int(time.time())
+    )
+    db.add(new_key)
+    db.commit()
+    return {
+        "api_key": raw_key,
+        "name": req.name,
+        "warning": "Save this key now - it will not be shown again!"
+    }
+
+@app.get("/admin/keys")
+async def list_keys(master: str = Depends(verify_master_key), db = Depends(get_db)):
+    keys = db.query(APIKey).all()
+    return {"keys": [{"name": k.name, "key_hash": k.key_hash, "created_at": k.created_at} for k in keys]}
+
+@app.post("/admin/keys/revoke")
+async def revoke_key(req: RevokeKeyRequest, master: str = Depends(verify_master_key), db = Depends(get_db)):
+    key_record = db.query(APIKey).filter(APIKey.key_hash == req.key_hash).first()
+    if key_record:
+        db.delete(key_record)
         db.commit()
-        return {"message": "API key revoked successfully"}
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
+        return {"status": "revoked"}
+    raise HTTPException(status_code=404, detail="Key not found")
 
-HTML_CONTENT = """
-<!DOCTYPE html>
-<html>
+HTML_CONTENT = """<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>Ollama API Server</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }
-        pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
-        code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; }
-        .status { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; }
-        .status-ok { background: #e6ffed; color: #22863a; }
-        h1 { border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
-        a { color: #0366d6; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ollama API Server</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f0f23;color:#e0e0e0;min-height:100vh}
+.container{max-width:900px;margin:0 auto;padding:40px 20px}
+h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#00d4ff,#7b2cbf);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.subtitle{color:#888;margin-bottom:40px}
+.card{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:12px;padding:24px;margin-bottom:20px}
+.card h2{color:#00d4ff;margin-bottom:16px;font-size:1.2rem}
+.endpoint{background:#0f0f1a;border-left:3px solid #00d4ff;padding:12px 16px;margin:8px 0;border-radius:0 8px 8px 0;font-family:"Courier New",monospace;font-size:.9rem}
+.method{color:#7ee787;font-weight:bold;margin-right:8px}
+.url{color:#dcdcaa}
+.status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:.85rem;font-weight:600}
+.status.ok{background:#1a472a;color:#7ee787}
+.status.warn{background:#4a3a1a;color:#ffa500}
+.chat-box{height:400px;overflow-y:auto;background:#0f0f1a;border-radius:8px;padding:16px;margin-bottom:16px}
+.message{margin-bottom:12px;padding:12px;border-radius:8px;max-width:80%}
+.message.user{background:#1a3a5c;margin-left:auto}
+.message.assistant{background:#2a2a4a}
+.input-row{display:flex;gap:10px}
+input{flex:1;background:#0f0f1a;border:1px solid #2a2a4a;color:#e0e0e0;padding:12px;border-radius:8px;font-size:1rem}
+button{background:linear-gradient(90deg,#00d4ff,#7b2cbf);color:white;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:600;font-size:1rem}
+button:hover{opacity:.9}
+.code-block{background:#0f0f1a;border-radius:8px;padding:16px;overflow-x:auto;font-family:"Courier New",monospace;font-size:.85rem;color:#dcdcaa;margin:10px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.nav{display:flex;gap:10px;margin-bottom:30px;flex-wrap:wrap}
+.nav a{color:#00d4ff;text-decoration:none;padding:8px 16px;border:1px solid #2a2a4a;border-radius:8px;font-size:.9rem}
+.nav a:hover{background:#1a1a2e}
+.key-input{width:100%;margin-bottom:10px}
+.alert{background:#1a472a;border:1px solid #2a5a3a;color:#7ee787;padding:12px;border-radius:8px;margin-bottom:16px;display:none}
+.alert.error{background:#4a1a1a;border-color:#5a2a2a;color:#ff6b6b}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{text-align:left;padding:12px;border-bottom:1px solid #2a2a4a}
+th{color:#00d4ff;font-size:.9rem}
+@media(max-width:600px){.grid{grid-template-columns:1fr}}
+</style>
 </head>
 <body>
-    <h1>Ollama API Server <span class="status status-ok">Active</span></h1>
-    <p>This is a high-performance wrapper for Ollama, providing OpenAI-compatible endpoints and API key authentication.</p>
+<div class="container">
+<div class="nav">
+<a href="/ui">Dashboard</a>
+<a href="/api-docs">API Docs</a>
+<a href="/docs">Swagger UI</a>
+<a href="/redoc">ReDoc</a>
+</div>
+<h1>Ollama API Server</h1>
+<p class="subtitle">Self-hosted LLM with FastAPI + Ollama + PostgreSQL Keys</p>
+
+<div class="card">
+<h2>API Key Required</h2>
+<p style="color:#888;margin-bottom:12px">All API endpoints require a Bearer token. Enter your key below to test:</p>
+<input type="password" id="apiKeyInput" class="key-input" placeholder="Enter your API key (ollama_xxxxxxxx...)" value="">
+<div class="alert" id="keyAlert"></div>
+</div>
+
+<div class="card">
+<h2>Connection Status</h2>
+<div id="status">Checking...</div>
+<div style="margin-top:10px;font-size:.9rem;color:#888">Base URL: <span id="baseUrl"></span></div>
+</div>
+
+<div class="card">
+<h2>API Endpoints</h2>
+<div class="endpoint"><span class="method">GET</span><span class="url">/health</span> - Health check</div>
+<div class="endpoint"><span class="method">GET</span><span class="url">/v1/models</span> - List models</div>
+<div class="endpoint"><span class="method">POST</span><span class="url">/v1/chat/completions</span> - Chat (OpenAI-compatible)</div>
+<div class="endpoint"><span class="method">POST</span><span class="url">/api/generate</span> - Generate text</div>
+<div class="endpoint"><span class="method">GET</span><span class="url">/api/models</span> - List models (native)</div>
+<div class="endpoint"><span class="method">POST</span><span class="url">/api/pull</span> - Pull model</div>
+</div>
+
+<div class="card">
+<h2>Test Chat</h2>
+<div class="chat-box" id="chatBox"></div>
+<div class="input-row">
+<input type="text" id="chatInput" placeholder="Type a message..." onkeypress="if(event.key==='Enter')sendChat()">
+<button id="sendBtn" onclick="sendChat()">Send</button>
+</div>
+</div>
+
+<div class="card">
+<h2>Available Models</h2>
+<table id="modelsTable">
+<thead>
+<tr><th>Model</th><th>ID</th><th>Created</th></tr>
+</thead>
+<tbody id="modelsBody">
+<tr><td colspan="3">Enter API key to load models...</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="grid">
+<div class="card">
+<h2>Python Example</h2>
+<div class="code-block">
+import requests<br><br>
+url = "<span class='base-url'></span>/v1/chat/completions"<br>
+headers = {<br>
+&nbsp;&nbsp;"Content-Type": "application/json",<br>
+&nbsp;&nbsp;"Authorization": "Bearer YOUR_API_KEY"<br>
+}<br>
+data = {<br>
+&nbsp;&nbsp;"model": "qwen2.5:0.5b",<br>
+&nbsp;&nbsp;"messages": [{"role": "user", "content": "Hello!"}]<br>
+}<br><br>
+res = requests.post(url, json=data, headers=headers)<br>
+print(res.json())
+</div>
+</div>
+<div class="card">
+<h2>cURL Example</h2>
+<div class="code-block">
+curl -X POST <span class='base-url'></span>/v1/chat/completions<br>
+-H "Content-Type: application/json"<br>
+-H "Authorization: Bearer YOUR_API_KEY"<br>
+-d '{"model":"qwen2.5:0.5b","messages":[{"role":"user","content":"Hello!"}]}'
+</div>
+</div>
+</div>
+</div>
+<script>
+const baseUrl = window.location.origin;
+document.getElementById('baseUrl').textContent = baseUrl;
+document.querySelectorAll('.base-url').forEach(el=>el.textContent=baseUrl);
+
+function getApiKey(){return document.getElementById('apiKeyInput').value.trim();}
+
+async function checkHealth(){
+try{
+const res = await fetch(baseUrl + '/health');
+const data = await res.json();
+const el = document.getElementById('status');
+if(data.ollama === 'connected'){
+el.innerHTML = '<span class="status ok">Ollama Connected | Auth Enabled</span>';
+}else{
+el.innerHTML = '<span class="status warn">Ollama Starting...</span>';
+}
+}catch{
+document.getElementById('status').innerHTML = '<span class="status warn">Server Starting...</span>';
+}
+}
+checkHealth();
+setInterval(checkHealth, 5000);
+
+async function loadModels() {
+    const key = getApiKey();
+    if(!key) return;
+    try {
+        const res = await fetch(baseUrl + '/v1/models', {
+            headers: {'Authorization': 'Bearer ' + key}
+        });
+        if(res.ok) {
+            const data = await res.json();
+            const body = document.getElementById('modelsBody');
+            body.innerHTML = '';
+            data.data.forEach(m => {
+                const row = `<tr><td>${m.id}</td><td>${m.id}</td><td>${new Date(m.created * 1000).toLocaleString()}</td></tr>`;
+                body.innerHTML += row;
+            });
+        }
+    } catch(e) {}
+}
+document.getElementById('apiKeyInput').addEventListener('change', loadModels);
+
+async function sendChat(){
+const key = getApiKey();
+if(!key){alert("Please enter your API key first");return;}
+const input = document.getElementById('chatInput');
+const btn = document.getElementById('sendBtn');
+const box = document.getElementById('chatBox');
+const text = input.value.trim();
+if(!text) return;
+
+input.value = '';
+box.innerHTML += `<div class="message user">${text}</div>`;
+box.scrollTop = box.scrollHeight;
+
+try {
+    btn.disabled = true;
+    const res = await fetch(baseUrl + '/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + key
+        },
+        body: JSON.stringify({
+            model: "qwen2.5:0.5b",
+            messages: [{role: "user", content: text}],
+            stream: true
+        })
+    });
     
-    <h3>Available Endpoints</h3>
-    <ul>
-        <li><code>GET /health</code> - Server health check</li>
-        <li><code>GET /v1/models</code> - List available models</li>
-        <li><code>POST /v1/chat/completions</code> - OpenAI-compatible chat</li>
-        <li><code>POST /api/generate</code> - Ollama-native generation</li>
-        <li><code>GET /api-docs</code> - API Documentation</li>
-    </ul>
-
-    <h3>Quick Start</h3>
-    <pre><code>curl https://ollama-fastapi-railway-deployment-qst2ba.fly.dev/v1/chat/completions \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "model": "tinyllama:latest",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'</code></pre>
-
-    <p><a href="/docs">Swagger UI</a> | <a href="/api-docs">API Guide</a></p>
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let assistantMsg = document.createElement('div');
+    assistantMsg.className = 'message assistant';
+    box.appendChild(assistantMsg);
+    
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\\n');
+        for (const line of lines) {
+            if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6);
+                if (dataStr === '[DONE]') break;
+                try {
+                    const data = JSON.parse(dataStr);
+                    const content = data.choices[0].delta.content || '';
+                    assistantMsg.textContent += content;
+                    box.scrollTop = box.scrollHeight;
+                } catch (e) {}
+            }
+        }
+    }
+} catch(e) {
+    box.innerHTML += `<div class="message assistant error">Error: ${e.message}</div>`;
+} finally {
+    btn.disabled = false;
+    box.scrollTop = box.scrollHeight;
+}
+}
+</script>
 </body>
-</html>
-"""
+</html>"""
 
-API_DOCS_CONTENT = """
-<!DOCTYPE html>
-<html>
+API_DOCS_CONTENT = """<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>API Documentation - Ollama Server</title>
-    <style>
-        body { font-family: -apple-system, sans-serif; line-height: 1.6; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #24292e; }
-        h1, h2, h3 { border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
-        pre { background: #f6f8fa; padding: 16px; border-radius: 6px; overflow: auto; }
-        code { font-family: monospace; background: rgba(27,31,35,0.05); padding: 0.2em 0.4em; border-radius: 3px; }
-        table { border-collapse: collapse; width: 100%; margin: 20px 0; }
-        th, td { border: 1px solid #dfe2e5; padding: 8px 12px; text-align: left; }
-        th { background: #f6f8fa; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Documentation - Ollama API Server</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f0f23;color:#e0e0e0;min-height:100vh}
+.container{max-width:900px;margin:0 auto;padding:40px 20px}
+h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#00d4ff,#7b2cbf);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.nav{display:flex;gap:10px;margin-bottom:30px;flex-wrap:wrap}
+.nav a{color:#00d4ff;text-decoration:none;padding:8px 16px;border:1px solid #2a2a4a;border-radius:8px;font-size:.9rem}
+.nav a:hover{background:#1a1a2e}
+.card{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:12px;padding:24px;margin-bottom:20px}
+.endpoint{background:#0f0f1a;border-left:3px solid #00d4ff;padding:12px 16px;margin:8px 0;border-radius:0 8px 8px 0;font-family:"Courier New",monospace;font-size:.9rem}
+.method{color:#7ee787;font-weight:bold;margin-right:8px}
+.url{color:#dcdcaa}
+.table{width:100%;border-collapse:collapse;margin:16px 0}
+.table th,.table td{text-align:left;padding:12px;border-bottom:1px solid #2a2a4a}
+.table th{color:#00d4ff;font-size:.9rem}
+.code-block{background:#0f0f1a;border-radius:8px;padding:16px;overflow-x:auto;font-family:"Courier New",monospace;font-size:.85rem;color:#dcdcaa;margin:10px 0}
+</style>
 </head>
 <body>
-    <h1>API Documentation</h1>
-    
-    <h2>Authentication</h2>
-    <p>All API requests must include a Bearer token in the <code>Authorization</code> header:</p>
-    <pre><code>Authorization: Bearer ollama_...</code></pre>
+<div class="container">
+<div class="nav">
+<a href="/ui">Dashboard</a>
+<a href="/api-docs">API Docs</a>
+<a href="/docs">Swagger UI</a>
+<a href="/redoc">ReDoc</a>
+</div>
+<h1>API Documentation</h1>
 
-    <h2>Chat Completions (OpenAI Compatible)</h2>
-    <p><code>POST /v1/chat/completions</code></p>
-    <table>
-        <tr><th>Field</th><th>Type</th><th>Description</th></tr>
-        <tr><td>model</td><td>string</td><td>Model name (e.g., tinyllama:latest)</td></tr>
-        <tr><td>messages</td><td>array</td><td>List of message objects</td></tr>
-        <tr><td>stream</td><td>boolean</td><td>Enable streaming (SSE)</td></tr>
-    </table>
+<div class="card">
+<h2>Authentication</h2>
+<p>All endpoints (except /health) require an API key passed as a Bearer token in the Authorization header.</p>
+<div class="code-block">Authorization: Bearer ollama_xxxxxxxxxxxxxxxx</div>
+</div>
 
-    <h2>Admin API</h2>
-    <p>Admin endpoints require the <code>X-Master-Key</code> header.</p>
-    <ul>
-        <li><code>GET /admin/keys</code> - List all keys</li>
-        <li><code>POST /admin/keys</code> - Create a new key</li>
-        <li><code>DELETE /admin/keys/{hash}</code> - Revoke a key</li>
-    </ul>
+<div class="card">
+<h2>OpenAI Compatible Endpoints</h2>
+<h3>Chat Completions</h3>
+<div class="endpoint"><span class="method">POST</span><span class="url">/v1/chat/completions</span></div>
+<table class="table">
+<tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+<tr><td>model</td><td>string</td><td>No</td><td>Model name (e.g. qwen2.5:0.5b)</td></tr>
+<tr><td>messages</td><td>array</td><td>Yes</td><td>List of message objects</td></tr>
+<tr><td>stream</td><td>boolean</td><td>No</td><td>Stream response</td></tr>
+</table>
+<div class="code-block">curl -X POST <span class="base-url"></span>/v1/chat/completions<br>
+-H "Authorization: Bearer YOUR_API_KEY"<br>
+-H "Content-Type: application/json"<br>
+-d '{"model":"qwen2.5:0.5b","messages":[{"role":"user","content":"Hello!"}]}'</div>
+</div>
+
+<div class="card">
+<h2>Key Management (Admin)</h2>
+<p>Requires <code>X-Master-Key</code> header.</p>
+<h3>Create Key</h3>
+<div class="endpoint"><span class="method">POST</span><span class="url">/admin/keys</span></div>
+<div class="code-block">curl -X POST <span class="base-url"></span>/admin/keys<br>
+-H "X-Master-Key: YOUR_MASTER_KEY"<br>
+-H "Content-Type: application/json"<br>
+-d '{"name": "my-new-key"}'</div>
+</div>
+
+</div>
+<script>
+document.querySelectorAll('.base-url').forEach(el=>el.textContent=window.location.origin);
+</script>
 </body>
-</html>
-"""
+</html>"""
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)
