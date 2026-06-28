@@ -9,5 +9,5 @@ jobs:
     steps:
       - name: Ping API
         run: |
-          curl -s https://ollama-fastapi-railway-deployment.fly.dev/ping
-          curl -s -X POST https://ollama-fastapi-railway-deployment.fly.dev/warmup
+          curl -s https://ollama-fastapi-railway-deployment-qst2ba.fly.dev/ping
+          curl -s -X POST https://ollama-fastapi-railway-deployment-qst2ba.fly.dev/warmup
