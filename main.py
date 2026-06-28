@@ -934,13 +934,19 @@ print(response.choices[0].message.content)</code></pre>
                 const text = document.getElementById('ollama-status-text');
 
                 if (data.status === 'ok') {
-                    dot.classList.replace('dot-offline', 'dot-online');
-                    dot.classList.replace('dot-warn', 'dot-online');
-                    text.innerText = 'Ollama: Online (' + (data.available_ollama_models?.length || 0) + ' models)';
+                    if (data.ollama === 'connected') {
+                        dot.classList.replace('dot-offline', 'dot-online');
+                        dot.classList.replace('dot-warn', 'dot-online');
+                        text.innerText = 'Ollama: Online (' + (data.available_ollama_models?.length || 0) + ' models)';
+                    } else {
+                        dot.classList.replace('dot-online', 'dot-warn');
+                        dot.classList.replace('dot-offline', 'dot-warn');
+                        text.innerText = 'Ollama: ' + (data.ollama || 'Starting...');
+                    }
                 } else {
-                    dot.classList.replace('dot-online', 'dot-warn');
-                    dot.classList.replace('dot-offline', 'dot-warn');
-                    text.innerText = 'Ollama: ' + (data.ollama || 'Degraded');
+                    dot.classList.replace('dot-online', 'dot-offline');
+                    dot.classList.replace('dot-warn', 'dot-offline');
+                    text.innerText = 'Server: ' + (data.status || 'Error');
                 }
             } catch (e) {
                 const dot = document.getElementById('ollama-status-dot');
