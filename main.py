@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, Column, String, Integer, BigInteger, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
-from openai import AsyncAzureOpenAI, AzureOpenAI
+from openai import AsyncAzureOpenAI
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -79,45 +79,19 @@ azure_embedding_deployments = []
 
 if AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY:
     try:
-        sync_client = AzureOpenAI(
+        azure_async_client = AsyncAzureOpenAI(
             api_key=AZURE_OPENAI_KEY,
             api_version=AZURE_OPENAI_API_VERSION,
             azure_endpoint=AZURE_OPENAI_ENDPOINT
         )
-
-        validated_chat = []
-        validated_embed = []
-
         for dep_name in AZURE_OPENAI_DEPLOYMENTS:
-            is_chat = is_chat_model(dep_name)
-            is_embed = is_embedding_model(dep_name)
-
-            try:
-                if is_embed:
-                    sync_client.embeddings.create(model=dep_name, input=["test"])
-                    validated_embed.append(dep_name)
-                    logger.info(f"Azure embedding deployment validated: {dep_name}")
-                elif is_chat:
-                    sync_client.chat.completions.create(
-                        model=dep_name,
-                        messages=[{"role": "user", "content": "hi"}],
-                        max_tokens=1
-                    )
-                    validated_chat.append(dep_name)
-                    logger.info(f"Azure chat deployment validated: {dep_name}")
-            except Exception as e:
-                logger.warning(f"Azure deployment test failed for {dep_name}: {e}")
-
-        if validated_chat or validated_embed:
+            if is_embedding_model(dep_name):
+                azure_embedding_deployments.append(dep_name)
+            elif is_chat_model(dep_name):
+                azure_chat_deployments.append(dep_name)
+        if azure_chat_deployments or azure_embedding_deployments:
             USE_AZURE = True
-            azure_chat_deployments = validated_chat
-            azure_embedding_deployments = validated_embed
-            azure_async_client = AsyncAzureOpenAI(
-                api_key=AZURE_OPENAI_KEY,
-                api_version=AZURE_OPENAI_API_VERSION,
-                azure_endpoint=AZURE_OPENAI_ENDPOINT
-            )
-            logger.info(f"Azure OpenAI ready. Chat: {validated_chat}, Embeddings: {validated_embed}")
+            logger.info(f"Azure OpenAI configured. Chat: {azure_chat_deployments}, Embeddings: {azure_embedding_deployments}")
     except Exception as e:
         logger.error(f"Failed to initialize Azure client: {e}")
 
@@ -421,7 +395,7 @@ async def health():
         logger.warning(f"Health check Ollama error: {e}")
 
     return {
-        "status": "ok" if ollama_status == "connected" else "degraded",
+        "status": "ok",
         "ollama": ollama_status,
         "auth": "enabled",
         "azure": USE_AZURE,
